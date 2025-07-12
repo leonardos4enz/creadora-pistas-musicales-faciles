@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🎼 Creador de Melodías</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/tone/build/Tone.js"></script>
+  <style>
+    :root {
+      --primary: #3786c7;
+      --light: #f5f7fa;
+      --dark: #222;
+      --radius: 0.75rem;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;padding:0;font-family:"Inter",sans-serif;background:var(--light);color:var(--dark);}  
+    .container{margin:auto;padding:2rem;}
+    h1{text-align:center;margin-bottom:1.5rem;}
+    .card{background:#fff;padding:1.5rem;border-radius:var(--radius);box-shadow:0 4px 12px rgba(0,0,0,.05);margin-bottom:1.5rem;}
+    label{font-weight:600;margin-right:.5rem;}
+    select,button,input[type=file]{padding:.45rem .9rem;font-size:1rem;border:1px solid #ccc;border-radius:.5rem;margin-right:.5rem;}
+    button.primary{background:var(--primary);color:#fff;border:1px solid #ccc;cursor:pointer;}
+    button.primary:disabled{opacity:.5;cursor:not-allowed;}
+
+    /* Piano keys */
+    #noteScroller{overflow-x:auto;padding-bottom:.5rem;}
+    #noteGrid{display:flex;gap:.4rem;min-height:165px;}
+    .key{display:flex;flex-direction:column;justify-content: center; align-items:center;gap:.35rem;padding:.5rem .45rem;border-radius:var(--radius);border:1px solid #ddd;background:#fafafa;position:relative;min-width:4px;}
+    .key.black{background:#333;border-color:#222;color:#eee;}
+    .noteLabel{font-weight:600;font-size:1rem;}
+    .btnCol{display:flex;flex-direction:column;gap:.3rem;width:100%;}
+    .btnCol button{font-size:.85rem;padding:.25rem .4rem;}
+    .key.black .btnCol button{border-color:#666;}
+
+    /* Chips */
+    #sequenceList{display:flex;flex-wrap:wrap;gap:.5rem;}
+    .chip{background:var(--primary);color:#fff;padding:.25rem 2.2rem .25rem .75rem;border-radius:999px;font-size:.875rem;position:relative;user-select:none;cursor:pointer;transition:filter .15s;}
+    .chip.rest{background:#888;}
+    .chip .del{position:absolute;right:.5rem;top:50%;transform:translateY(-50%);font-weight:bold;opacity:.85;cursor:pointer;}
+    .chip:hover{filter:brightness(1.12);}    
+    .chip.playing{animation:blink .4s alternate infinite;}
+    @keyframes blink{from{filter:brightness(1);}to{filter:brightness(1.6);} }
+    footer{text-align:center;font-size:.875rem;color:#666;margin-top:2rem;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎼 Diseña tu melodía</h1>
+
+    <!-- Constructor -->
+    <div class="card" id="builder">
+      <label for="durSelect">Duración</label>
+      <select id="durSelect">
+        <option value="16n">𝅘𝅥𝅯 Semicorchea (0.125 s)</option>
+        <option value="8n">𝅘𝅥𝅮 Corchea (0.25 s)</option>
+        <option value="4n" selected>𝅘𝅥 Negra (0.5 s)</option>
+        <option value="4n.">𝅘𝅥· Negra. (0.75 s)</option>
+        <option value="2n">𝅗𝅥 Blanca (1 s)</option>
+        <option value="2n.">𝅗𝅥· Blanca. (1.5 s)</option>
+      </select>
+      <button id="restBtn">Añadir silencio</button>
+
+      <h3 style="margin-top:1.2rem;">Piano virtual</h3>
+      <div id="noteScroller"><div id="noteGrid"></div></div>
+    </div>
+
+    <!-- Secuencia -->
+    <div class="card">
+      <h3>Secuencia (clic para cambiar duración · ✕ para borrar)</h3>
+      <div id="sequenceList"></div>
+    </div>
+
+    <!-- Controles -->
+    <div class="card" id="controls">
+      <label for="instrumentSelect">Instrumento</label>
+      <select id="instrumentSelect">
+        <option value="flute">Flauta</option>
+        <option value="acoustic_grand_piano">Piano</option>
+        <option value="violin">Violín</option>
+        <option value="clarinet">Clarinete</option>
+        <option value="acoustic_guitar_nylon">Guitarra</option>
+        <option value="trumpet">Trompeta</option>
+        <option value="alto_sax">Saxofón</option>
+      </select>
+
+      <button id="playBtn" class="primary" disabled>▶️ Reproducir</button>
+      <button id="stopBtn">⏹️ Detener</button>
+      <button id="clearBtn">🗑️ Limpiar</button>
+      <button id="saveBtn">💾 Guardar</button>
+      <input type="file" id="loadInput" accept=".json" style="display:none;" />
+      <button id="loadBtn">📂 Cargar</button>
+      <span id="loaderMsg" style="font-size:.875rem;color:#666;margin-left:.5rem;">Cargando sonidos…</span>
+    </div>
+
+    <footer>Hecho con 😎 usando Tone.js y <a href="https://github.com/gleitz/midi-js-soundfonts" target="_blank" rel="noopener">FluidR3_GM</a></footer>
+  </div>
+
+<script>
+// ---------- CONFIG ----------
+const NOTE_MAP={C:"Do",Db:"Do#",D:"Re",Eb:"Re#",E:"Mi",F:"Fa",Gb:"Fa#",G:"Sol",Ab:"Sol#",A:"La",Bb:"La#",B:"Si"};
+const NOTES=["C4","Db4","D4","Eb4","E4","F4","Gb4","G4","Ab4","A4","Bb4","B4","C5","Db5","D5","Eb5","E5","F5","Gb5","G5","Ab5","A5","Bb5","B5"];
+const BLACKS=new Set(["Db","Eb","Gb","Ab","Bb"]);
+const DURATIONS=["16n","8n","4n","4n.","2n","2n."];
+
+// Build piano
+const noteGrid=document.getElementById("noteGrid");
+NOTES.forEach(n=>{
+  const base=n.slice(0,-1), oct=n.slice(-1);
+  const key=document.createElement("div");
+  key.className="key"+(BLACKS.has(base)?" black":"");
+  key.dataset.note=n;
+  key.innerHTML=`<div class="noteLabel">${NOTE_MAP[base]}<sub>${oct}</sub></div>
+    <div class="btnCol">
+      <button data-action="preview" title="Escuchar">▶</button>
+      <button data-action="add" title="Añadir" class="primary">+</button>
+    </div>`;
+  noteGrid.appendChild(key);
+});
+
+// ------- STATE --------
+const melody=[];
+let sampler=null; // instancia Tone.Sampler
+let isPlaying=false;
+let currentInstrument=document.getElementById("instrumentSelect").value;
+
+// -------- ELEMENTS --------
+const seqList=document.getElementById("sequenceList");
+const playBtn=document.getElementById("playBtn");
+const loaderMsg=document.getElementById("loaderMsg");
+
+// -------- EVENT LISTENERS --------
+
+document.getElementById("restBtn").onclick=()=>addEvent("rest");
+playBtn.onclick=play;
+document.getElementById("stopBtn").onclick=stop;
+document.getElementById("clearBtn").onclick=()=>{melody.length=0;renderSeq();};
+document.getElementById("saveBtn").onclick=saveSong;
+document.getElementById("loadBtn").onclick=()=>document.getElementById("loadInput").click();
+document.getElementById("loadInput").onchange=loadSong;
+document.getElementById("instrumentSelect").onchange=async e=>{
+  currentInstrument=e.target.value;
+  // Forzar recarga
+  if(sampler){sampler.dispose(); sampler=null;}
+  playBtn.disabled=true;
+  loaderMsg.textContent="Cargando sonidos…";
+  await initSampler();
+};
+
+// Chip interactions
+seqList.addEventListener("click",e=>{
+  const chip=e.target.closest(".chip"); if(!chip) return;
+  const idx=parseInt(chip.dataset.index);
+  if(e.target.classList.contains("del")){
+    melody.splice(idx,1); renderSeq(); return;
+  }
+  // cycle duration
+  const ev=melody[idx];
+  const curIdx=DURATIONS.indexOf(ev.dur);
+  ev.dur=DURATIONS[(curIdx+1)%DURATIONS.length];
+  renderSeq();
+});
+
+// Piano key actions
+noteGrid.addEventListener("click",async e=>{
+  const btn=e.target.closest("button"); if(!btn) return;
+  const note=btn.closest(".key").dataset.note;
+  const action=btn.dataset.action;
+  if(action==="preview"){ await initSampler(); sampler.triggerAttackRelease(note,"8n"); return; }
+  if(action==="add"){ addEvent("note",note); return; }
+  if(action==="test"){ testWith(note); return; }
+});
+
+// ------------- SAMPLER --------------
+async function initSampler(){
+  if(sampler){await sampler.loaded; return;}
+  await Tone.start();
+  // Ficheros a cargar (los mismos para cada instrumento)
+  const URLS={};
+  NOTES.forEach(n=>URLS[n]=`${n}.mp3`);
+  sampler=new Tone.Sampler({urls:URLS, baseUrl:`https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/${currentInstrument}-mp3/`}).toDestination();
+  sampler.instrument=currentInstrument;
+  await sampler.loaded;
+  loaderMsg.textContent=`Instrumento listo: ${document.querySelector(`#instrumentSelect option[value="${currentInstrument}"]`).textContent}`;
+  playBtn.disabled=false;
+}
+initSampler();
+
+// -------------- HELPERS --------------
+function addEvent(type,note=null){
+  const dur=document.getElementById("durSelect").value;
+  if(type==="note"&&note) melody.push({type:"note",note,dur});
+  else if(type==="rest") melody.push({type:"rest",dur});
+  renderSeq();
+}
+function renderSeq(){
+  seqList.innerHTML="";
+  melody.forEach((ev,i)=>{
+    const span=document.createElement("span"); span.className="chip"+(ev.type==="rest"?" rest":"");
+    const label=ev.type==="note"?`${NOTE_MAP[ev.note.slice(0,-1)]}${ev.note.slice(-1)}`:"𝄻";
+    span.innerHTML= label+" • "+ev.dur+` <span class="del" title="Eliminar">✕</span>`;
+    span.dataset.index=i;
+    seqList.appendChild(span);
+  });
+}
+async function playSequence(seq){
+  await initSampler(); let acc=0;
+  seq.forEach(ev=>{ const sec=Tone.Time(ev.dur).toSeconds(); if(ev.type==="note") sampler.triggerAttackRelease(ev.note,ev.dur,Tone.now()+acc); acc+=sec; });
+}
+async function testWith(note){
+  const dur=document.getElementById("durSelect").value; const seq=[...melody,{type:"note",note,dur}]; await playSequence(seq);
+}
+
+async function play(){ if(isPlaying||!melody.length) return; isPlaying=true; let acc=0; melody.forEach((ev,i)=>{
+  const chip=seqList.children[i]; const sec=Tone.Time(ev.dur).toSeconds();
+  setTimeout(()=>chip.classList.add("playing"),acc*1000);
+  setTimeout(()=>chip.classList.remove("playing"),(acc+sec)*1000);
+  acc+=sec; });
+  playSequence(melody); setTimeout(()=>isPlaying=false,acc*1000+50);
+}
+
+function stop(){ document.querySelectorAll(".chip.playing").forEach(c=>c.classList.remove("playing")); if(sampler&&sampler.context.state==="running") sampler.releaseAll(); isPlaying=false; }
+
+function saveSong(){ const blob=new Blob([JSON.stringify(melody)],{type:"application/json"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="melodia.json"; a.click(); URL.revokeObjectURL(url); }
+function loadSong(e){ const f=e.target.files[0]; if(!f) return; const reader=new FileReader(); reader.onload=ev=>{ try{ const data=JSON.parse(ev.target.result); if(Array.isArray(data)){ melody.length=0; melody.push(...data); renderSeq(); } } catch{ alert("Archivo inválido"); } }; reader.readAsText(f); }
+</script>
+</body>
+</html>
